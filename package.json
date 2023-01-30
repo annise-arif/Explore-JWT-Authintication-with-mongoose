@@ -1,7 +1,30 @@
 {
   "dependencies": {
+    "dotenv": "^16.0.3",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^6.9.0"
+  },
+  "name": "mongose-authentication",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "startdev": "env-cmd -e dev nodemon server.js",
+    "startprod": "env-cmd -e prod nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/annise-arif/Explore-JWT-Authintication-with-mongoose.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/annise-arif/Explore-JWT-Authintication-with-mongoose/issues"
+  },
+  "homepage": "https://github.com/annise-arif/Explore-JWT-Authintication-with-mongoose#readme",
+  "description": "",
+  "devDependencies": {
+    "env-cmd": "^10.1.0"
   }
 }
