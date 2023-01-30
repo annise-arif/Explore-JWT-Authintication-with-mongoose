@@ -2,27 +2,14 @@ const express = require("express");
 const app = express();
 const mongoose = require("mongoose");
 const port = process.env.PORT;
-const User = require("./models/User");
 
-app.get("/test", async (req, res) => {
-  try {
-    const newUser = new User({
-      email: "test@test.com",
-      password: "test",
-      emailConfirmed: false,
-      emailToken: "test",
-      security: {
-        tokens: null,
-        passwordReset: null,
-      },
-    });
+app.use(express.json());
 
-    await newUser.save();
-    res.send(newUser);
-  } catch (err) {
-    res.send(err);
-  }
-});
+// Routes
+const authRoutes = require("./routes/auth");
+
+// Declare API category endpoints
+app.use("/api/auth", authRoutes);
 
 mongoose
   .connect(
