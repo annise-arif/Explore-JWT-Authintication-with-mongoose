@@ -10,8 +10,4 @@ const loginSchema = Joi.object({
   password: Joi.string().min(6).max(255),
 });
 
-const emailSchema = Joi.object({
-  email: Joi.string().min(4).max(25).email(),
-});
-
-module.exports = { registerSchema, loginSchema, emailSchema };
+module.exports = { registerSchema, loginSchema };
