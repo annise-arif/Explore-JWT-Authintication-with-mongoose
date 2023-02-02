@@ -1,7 +1,7 @@
 const express = require("express");
 const app = express();
-const mongoose = require("mongoose");
 const port = process.env.PORT;
+const mongoose = require("mongoose");
 
 app.use(express.json());
 
@@ -13,19 +13,26 @@ app.use("/api/auth", authRoutes);
 
 mongoose
   .connect(
-    `${process.env.DB_PROTOCOL}://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}/${process.env.DB_NAME}?${process.env.DB_PARAMS}`
+    `${process.env.DB_PROTOCOL}://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}/${process.env.DB_NAME}?${process.env.DB_PARAMS}`,
+    {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      useFindAndModify: false,
+      useCreateIndex: true,
+    }
   )
   .then(() => {
     app.listen(port, () => {
-      console.log(`Example app listening to http://localhost: ${port}`);
+      console.log("API Listening to http://localhost:" + port);
     });
   })
   .catch((err) => {
     console.log(err);
   });
+
 process.on("SIGINT", () => {
   mongoose.connection.close(() => {
-    console.log("Mongoose disconnectd on app termination");
+    console.log("Mongoose disconnected on app termination");
     process.exit(0);
   });
 });
