@@ -4,6 +4,7 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
+    unique: true,
     min: 4,
     max: 25,
   },
@@ -16,7 +17,7 @@ const userSchema = new mongoose.Schema({
   emailConfirmed: {
     type: Boolean,
     required: true,
-    default: true,
+    default: false,
   },
   emailToken: {
     type: String,
@@ -34,6 +35,20 @@ const userSchema = new mongoose.Schema({
         default: null,
       },
       provisionalPassword: {
+        type: String,
+        default: null,
+      },
+      expiry: {
+        type: Date,
+        default: null,
+      },
+    },
+    changeEmail: {
+      token: {
+        type: String,
+        default: null,
+      },
+      provisionalEmail: {
         type: String,
         default: null,
       },

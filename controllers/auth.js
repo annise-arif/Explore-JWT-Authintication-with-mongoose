@@ -4,6 +4,7 @@ const validation = require("../helpers/validation");
 const bcrypt = require("bcrypt");
 const { v4: uuidv4 } = require("uuid");
 const nodemailer = require("nodemailer");
+const moment = require("moment");
 
 const login = async (req, res) => {
   try {
@@ -17,7 +18,7 @@ const login = async (req, res) => {
         original: error._original,
       });
     } else {
-      const user = await User.findOne({ email: req.body.email });
+      const user = await User.findOne({ email: req.body?.email });
 
       // Check if the email is correct
       if (user) {
@@ -62,7 +63,15 @@ const login = async (req, res) => {
               .status(500)
               .json({ error: { status: 500, message: "SERVER_ERROR" } });
           }
+        } else {
+          res
+            .status(403)
+            .json({ error: { status: 403, message: "INVALID_CREDENTIALS" } });
         }
+      } else {
+        res
+          .status(403)
+          .json({ error: { status: 403, message: "INVALID_CREDENTIALS" } });
       }
     }
   } catch (err) {
@@ -104,7 +113,6 @@ const register = async (req, res) => {
           },
         },
       });
-      console.log(user);
 
       // Attempt to save the user in database
       await user.save();
@@ -129,7 +137,7 @@ const register = async (req, res) => {
 
       // Assign the token to user and save
       await User.updateOne(
-        { email: user?.email },
+        { email: user.email },
         {
           $push: {
             "security.tokens": {
@@ -166,7 +174,7 @@ const register = async (req, res) => {
     console.log(err);
     let errorMessage;
 
-    if (err.keyPattern?.email === 1) {
+    if (err.keyPattern.email === 1) {
       errorMessage = "EMAIL_EXISTS";
     } else {
       errorMessage = err;
@@ -245,9 +253,9 @@ const confirmEmailToken = async (req, res) => {
       // Check if email is already confirmed
       if (!user.emailConfirmed) {
         // Check if provided email token matches user's email token
-        if (emailToken === user?.emailToken) {
+        if (emailToken === user.emailToken) {
           await User.updateOne(
-            { email: decodedAccessToken?.email },
+            { email: decodedAccessToken.email },
             { $set: { emailConfirmed: true, emailToken: null } }
           );
           res
@@ -271,10 +279,231 @@ const confirmEmailToken = async (req, res) => {
   }
 };
 
+const resetPasswordConfirm = async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.body.email });
+
+    // Check if supplied passwordResetToken matches with the user's stored one
+    if (user.security.passwordReset.token === req.body.passwordResetToken) {
+      // Check if password reset token is expired
+      if (
+        new Date().getTime() <=
+        new Date(user.security.passwordReset.expiry).getTime()
+      ) {
+        await User.updateOne(
+          { email: req.body.email },
+          {
+            $set: {
+              password: user.security.passwordReset.provisionalPassword,
+              "security.passwordReset.token": null,
+              "security.passwordReset.provisionalPassword": null,
+              "security.passwordReset.expiry": null,
+            },
+          }
+        );
+
+        res.status(200).json({
+          success: { status: 200, message: "PASSWORD_RESET_SUCCESS" },
+        });
+      } else {
+        await User.updateOne(
+          { email: req.body.email },
+          {
+            $set: {
+              "security.passwordReset.token": null,
+              "security.passwordReset.provisionalPassword": null,
+              "security.passwordReset.expiry": null,
+            },
+          }
+        );
+
+        res.status(401).json({
+          error: { status: 401, message: "PASSWORD_RESET_TOKEN_EXPIRED" },
+        });
+      }
+    } else {
+      res.status(401).json({
+        error: { status: 401, message: "INVALID_PASSWORD_RESET_TOKEN" },
+      });
+    }
+  } catch (err) {
+    res.status(400).json({ error: { status: 400, message: "BAD_REQUEST" } });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    if (
+      req.body.provisionalPassword.length >= 6 &&
+      req.body.provisionalPassword.length <= 255
+    ) {
+      // Hash Password
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(
+        req.body.provisionalPassword,
+        salt
+      );
+
+      // Generate a password reset token
+      const passwordResetToken = uuidv4();
+      const expiresIn = moment().add(10, "m").toISOString();
+
+      // Update user with password token
+      const user = await User.findOneAndUpdate(
+        { email: req.body.email },
+        {
+          $set: {
+            "security.passwordReset": {
+              token: passwordResetToken,
+              provisionalPassword: hashedPassword,
+              expiry: expiresIn,
+            },
+          },
+        }
+      );
+
+      await sendPasswordResetConfirmation({
+        email: req.body.email,
+        passwordResetToken: passwordResetToken,
+      });
+
+      res.status(200).json({
+        success: { status: 200, message: "PASSWORD_RESET_EMAIL_SENT" },
+      });
+    } else {
+      res
+        .status(400)
+        .json({ error: { status: 400, message: "PASSWORD_INPUT_ERROR" } });
+    }
+  } catch (err) {
+    res.status(400).json({ error: { status: 400, message: "BAD_REQUEST" } });
+  }
+};
+
+const changeEmail = async (req, res) => {
+  try {
+    if (validation.emailSchema.validate({ email: req.body.provisionalEmail })) {
+      // Decode Access Token
+      const accessToken = req.header("Authorization").split(" ")[1];
+      const decodeAccessToken = jwt.verify(
+        accessToken,
+        process.env.SECRET_ACCESS_TOKEN
+      );
+
+      // Check if email exists
+      const emailExistsCheck = await User.findOne({
+        email: req.body.provisionalEmail,
+      });
+
+      if (!emailExistsCheck) {
+        // Generate an email confirmation token
+        const changeEmailToken = uuidv4();
+        const expiresIn = moment().add(10, "m").toISOString();
+
+        // Update user with change email token
+        const user = await User.findOneAndUpdate(
+          { email: decodeAccessToken.email },
+          {
+            $set: {
+              "security.changeEmail": {
+                token: changeEmailToken,
+                provisionalEmail: req.body.provisionalEmail,
+                expiry: expiresIn,
+              },
+            },
+          }
+        );
+
+        await changeEmailConfirmation({
+          email: user.email,
+          emailToken: changeEmailToken,
+        });
+
+        res
+          .status(200)
+          .json({ success: { status: 200, message: "CHANGE_EMAIL_SENT" } });
+      } else {
+        res
+          .status(400)
+          .json({ error: { status: 400, message: "EMAIL_USER_REGISTERED" } });
+      }
+    } else {
+      res.status(400).json({ error: { status: 400, message: "EMAIL_INPUT" } });
+    }
+  } catch (err) {
+    res.status(400).json({ error: { status: 200, message: "BAD_REQUEST" } });
+  }
+};
+
+const changeEmailConfirm = async (req, res) => {
+  try {
+    // Decode Access Token
+    const accessToken = req.header("Authorization").split(" ")[1];
+    const decodedAccessToken = jwt.verify(
+      accessToken,
+      process.env.SECRET_ACCESS_TOKEN
+    );
+
+    // Fetch user
+    const user = await User.findOne({ email: decodedAccessToken.email });
+
+    // Check if the email exists
+    const emailExistsCheck = await User.findOne({
+      email: user.security.changeEmail.provisionalEmail,
+    });
+
+    if (!emailExistsCheck) {
+      if (user.security.changeEmail.token === req.body.changeEmailToken) {
+        // Check if the change email token is not expired
+        if (
+          new Date().getTime() <=
+          new Date(user.security.changeEmail.expiry).getTime()
+        ) {
+          await User.updateOne(
+            { email: decodedAccessToken.email },
+            {
+              $set: {
+                email: user.security.changeEmail.provisionalEmail,
+                "security.changeEmail.token": null,
+                "security.changeEmail.provisionalEmail": null,
+                "security.changeEmail.expiry": null,
+              },
+            }
+          );
+          res.status(200).json({
+            success: { status: 200, message: "CHANGE_EMAIL_SUCCESS" },
+          });
+        } else {
+          res.status(401).json({
+            success: { status: 401, message: "CHANGE_EMAIL_TOKEN_EXPIRED" },
+          });
+        }
+      } else {
+        res.status(401).json({
+          success: { status: 401, message: "INVALID_CHANGE_EMAIL_TOKEN" },
+        });
+      }
+    } else {
+      await User.updateOne(
+        { email: decodedAccessToken.email },
+        {
+          $set: {
+            "security.changeEmail.token": null,
+            "security.changeEmail.provisionalEmail": null,
+            "security.changeEmail.expiry": null,
+          },
+        }
+      );
+    }
+  } catch (err) {
+    res.status(400).json({ error: { status: 400, message: "BAD_REQUEST" } });
+  }
+};
+
 const test = async (req, res) => {
   try {
     const newUser = new User({
-      email: "test3@test.com",
+      email: "test2@test.com",
       password: "test",
       emailConfirmed: false,
       emailToken: "test",
@@ -298,7 +527,7 @@ const addRefreshToken = async (user, refreshToken) => {
     // Check if there less than 5
     if (existingRefreshTokens.length < 5) {
       await User.updateOne(
-        { email: user?.email },
+        { email: user.email },
         {
           $push: {
             "security.tokens": {
@@ -311,7 +540,7 @@ const addRefreshToken = async (user, refreshToken) => {
     } else {
       // Otherwise, remove the last token
       await User.updateOne(
-        { email: user?.email },
+        { email: user.email },
         {
           $pull: {
             "security.tokens": {
@@ -323,7 +552,7 @@ const addRefreshToken = async (user, refreshToken) => {
 
       // Push the new token
       await User.updateOne(
-        { email: user?.email },
+        { email: user.email },
         {
           $push: {
             "security.tokens": {
@@ -340,6 +569,24 @@ const addRefreshToken = async (user, refreshToken) => {
   }
 };
 
+const changeEmailConfirmation = async (user) => {
+  const transport = nodemailer.createTransport({
+    host: process.env.NODEMAILER_HOST,
+    port: process.env.NODEMAILER_PORT,
+    auth: {
+      user: process.env.NODEMAILER_USER,
+      pass: process.env.NODEMAILER_PASS,
+    },
+  });
+
+  const info = await transport.sendMail({
+    from: '"Course Test" <noreply@coursetest.com>',
+    to: user.email,
+    subject: "Confirm Your Email",
+    text: `Click the link to confirm your new email change: http://localhost:9000/confirm-email-change/${user?.emailToken}`,
+  });
+};
+
 const sendEmailConfirmation = async (user) => {
   const transport = nodemailer.createTransport({
     host: process.env.NODEMAILER_HOST,
@@ -352,10 +599,38 @@ const sendEmailConfirmation = async (user) => {
 
   const info = await transport.sendMail({
     from: '"Course Test" <noreply@coursetest.com>',
-    to: user?.email,
+    to: user.email,
     subject: "Confirm Your Email",
-    text: `Click the link to confirm your email: http://localhost:9000/confirm-email/${user.emailToken}`,
+    text: `Click the link to confirm your email: http://localhost:9000/confirm-email/${user?.emailToken}`,
   });
 };
 
-module.exports = { test, login, register, token, confirmEmailToken };
+const sendPasswordResetConfirmation = async (user) => {
+  const transport = nodemailer.createTransport({
+    host: process.env.NODEMAILER_HOST,
+    port: process.env.NODEMAILER_PORT,
+    auth: {
+      user: process.env.NODEMAILER_USER,
+      pass: process.env.NODEMAILER_PASS,
+    },
+  });
+
+  const info = await transport.sendMail({
+    from: '"Course Test" <noreply@coursetest.com>',
+    to: user.email,
+    subject: "Reset Your Password",
+    text: `Click the link to confirm your password reset: http://localhost:9000/confirm-password/${user.passwordResetToken}`,
+  });
+};
+
+module.exports = {
+  test,
+  login,
+  register,
+  token,
+  confirmEmailToken,
+  resetPassword,
+  resetPasswordConfirm,
+  changeEmail,
+  changeEmailConfirm,
+};
